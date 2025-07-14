@@ -42,6 +42,7 @@ export type CLIOptions = {
   config?: string;
   device?: string;
   executablePath?: string;
+  extensionPath?: string;
   headless?: boolean;
   host?: string;
   ignoreHttpsErrors?: boolean;
@@ -113,6 +114,16 @@ export function validateConfig(config: Config) {
     if (config.browser?.browserName !== 'chromium')
       throw new Error('Extension mode is only supported for Chromium browsers.');
   }
+  
+  // Check if extension path is being used with compatible browser
+  if (config.browser?.launchOptions?.args) {
+    const hasExtensionArgs = config.browser.launchOptions.args.some(arg => 
+      arg.includes('--load-extension') || arg.includes('--disable-extensions-except')
+    );
+    if (hasExtensionArgs && config.browser.browserName !== 'chromium') {
+      throw new Error('Chrome extensions are only supported with Chromium browsers (chrome, chromium, msedge).');
+    }
+  }
 }
 
 export async function configFromCLIOptions(cliOptions: CLIOptions): Promise<Config> {
@@ -156,6 +167,28 @@ export async function configFromCLIOptions(cliOptions: CLIOptions): Promise<Conf
     };
     if (cliOptions.proxyBypass)
       launchOptions.proxy.bypass = cliOptions.proxyBypass;
+  }
+
+  // Handle extension path from CLI
+  if (cliOptions.extensionPath) {
+    // Validate extension path exists
+    if (!fs.existsSync(cliOptions.extensionPath)) {
+      throw new Error(`Extension path does not exist: ${cliOptions.extensionPath}`);
+    }
+    
+    const extensionArgs = [
+      `--disable-extensions-except=${cliOptions.extensionPath}`,
+      `--load-extension=${cliOptions.extensionPath}`
+    ];
+    
+    if (launchOptions.args) {
+      launchOptions.args.push(...extensionArgs);
+    } else {
+      launchOptions.args = extensionArgs;
+    }
+    
+    // Extensions require headless=false
+    launchOptions.headless = false;
   }
 
   if (cliOptions.device && cliOptions.cdpEndpoint)
@@ -222,7 +255,46 @@ async function loadConfig(configFile: string | undefined): Promise<Config> {
     return {};
 
   try {
-    return JSON.parse(await fs.promises.readFile(configFile, 'utf8'));
+    const config = JSON.parse(await fs.promises.readFile(configFile, 'utf8'));
+    
+    // Handle extension configuration from config file
+    if (config.extensionPath) {
+      // Validate extension path exists
+      if (!fs.existsSync(config.extensionPath)) {
+        throw new Error(`Extension path does not exist: ${config.extensionPath}`);
+      }
+      
+      if (!config.browser) config.browser = {};
+      if (!config.browser.launchOptions) config.browser.launchOptions = {};
+      
+      // Set up extension args
+      const extensionArgs = [
+        `--disable-extensions-except=${config.extensionPath}`,
+        `--load-extension=${config.extensionPath}`
+      ];
+      
+      // Merge with existing args if any
+      if (config.browser.launchOptions.args) {
+        config.browser.launchOptions.args = [...config.browser.launchOptions.args, ...extensionArgs];
+      } else {
+        config.browser.launchOptions.args = extensionArgs;
+      }
+      
+      // Extensions require headless=false
+      config.browser.launchOptions.headless = false;
+      
+      // Remove extensionPath from top level
+      delete config.extensionPath;
+    }
+    
+    // Handle userDataDir from config file
+    if (config.userDataDir) {
+      if (!config.browser) config.browser = {};
+      config.browser.userDataDir = config.userDataDir;
+      delete config.userDataDir;
+    }
+    
+    return config;
   } catch (error) {
     throw new Error(`Failed to load config file: ${configFile}, ${error}`);
   }

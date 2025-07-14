@@ -37,6 +37,7 @@ program
     .option('--config <path>', 'path to the configuration file.')
     .option('--device <device>', 'device to emulate, for example: "iPhone 15"')
     .option('--executable-path <path>', 'path to the browser executable.')
+    .option('--extension-path <path>', 'path to the Chrome extension directory to load')
     .option('--headless', 'run browser in headless mode, headed by default')
     .option('--host <host>', 'host to bind server to. Default is localhost. Use 0.0.0.0 to bind to all interfaces.')
     .option('--ignore-https-errors', 'ignore https errors')
@@ -66,11 +67,19 @@ program
 
       const server = new Server(config);
       server.setupExitWatchdog();
+      
+      // Add console logging for server startup
+      console.log(`[INFO] Starting Playwright MCP Server...`);
+      console.log(`[INFO] Config:`, JSON.stringify(config, null, 2));
 
-      if (httpServer)
+      if (httpServer) {
+        console.log(`[INFO] Starting HTTP transport on port ${config.server.port}`);
         await startHttpTransport(httpServer, server);
-      else
+        console.log(`[INFO] HTTP server started successfully on http://localhost:${config.server.port}`);
+      } else {
+        console.log(`[INFO] Starting STDIO transport`);
         await startStdioTransport(server);
+      }
 
       if (config.saveTrace) {
         const server = await startTraceViewerServer();
